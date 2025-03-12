@@ -45,20 +45,10 @@ def prepare_dataset(batch):
     # print(type(batch["audio"]))
     return batch
 
-def extract_feature(batch):
-    audio=[np.array(i) for i in batch["audio"]]
-    # print(len(batch["audio"][0]))
-    # compute log-Mel input features from input audio array
-    features=feature_extractor(audio, sampling_rate=16000).input_features
-    batch["input_features"] = features
-    tokenizer.set_prefix_tokens(language="Vietnamese", task="transcribe") 
-    # encode target text to label ids 
-    batch["labels"] = tokenizer(batch["transcript"]).input_ids
-    return batch
 
 dataset = dataset.map(prepare_dataset, num_proc=4)
 
-dataset = dataset.map(extract_feature, num_proc=4,batched=True,batch_size=2)
+# dataset = dataset.map(extract_feature, num_proc=4,batched=True,batch_size=2)
 
 from transformers import WhisperForConditionalGeneration
 
@@ -81,11 +71,19 @@ class DataCollatorSpeechSeq2SeqWithPadding:
     def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
         # split inputs and labels since they have to be of different lengths and need different padding methods
         # first treat the audio inputs by simply returning torch tensors
-        input_features = [{"input_features": feature["input_features"]} for feature in features]
+        audio=[np.array(i["audio"]) for i in features]
+        # print(len(batch["audio"][0]))
+        # compute log-Mel input features from input audio array
+        mel_features=feature_extractor(audio, sampling_rate=16000).input_features
+        print(len(mel_features))
+        tokenizer.set_prefix_tokens(language="Vietnamese", task="transcribe") 
+        # encode target text to label ids 
+        labels_ids=tokenizer([i["transcript"] for i in features]).input_ids
+        input_features = [{"input_features": i} for i in mel_features]
         batch = self.processor.feature_extractor.pad(input_features, return_tensors="pt")
 
         # get the tokenized label sequences
-        label_features = [{"input_ids": feature["labels"]} for feature in features]
+        label_features = [{"input_ids":i} for i in labels_ids]
         # pad the labels to max length
         labels_batch = self.processor.tokenizer.pad(label_features, return_tensors="pt")
 
@@ -145,6 +143,7 @@ training_args = Seq2SeqTrainingArguments(
     metric_for_best_model="wer",
     greater_is_better=False,
     # push_to_hub=True,
+    remove_unused_columns=False
 )
 
 from transformers import Seq2SeqTrainer
